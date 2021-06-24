@@ -124,11 +124,13 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
                 if (sValue.isEmpty()) {
                     value = 1.0;
                 } else {
-                    try {
-                        value = Double.parseDouble(sValue);
-                        getInfoForFirstTime(dao, currencyDatabaseModel, preferenceManager.getString("base_rate"), value);
-                    } catch (NumberFormatException e) {
-                        Toast.makeText(context, "Please write right number format", Toast.LENGTH_SHORT).show();
+                    if(checkInternetConnection()){
+                        try {
+                            value = Double.parseDouble(sValue);
+                            getInfoForFirstTime(dao, currencyDatabaseModel, preferenceManager.getString("base_rate"), value);
+                        } catch (NumberFormatException e) {
+                            Toast.makeText(context, "Please write right number format", Toast.LENGTH_SHORT).show();
+                        }
                     }
                 }
             }
@@ -154,6 +156,36 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
         }
 
         editRate.setText("1");
+    }
+
+    /**
+     * when edit text changed then TextWatcher interface's onTextChanged get string this is not essential
+     * because check it every 1 second
+     * @param editText
+     */
+    private void editRateTextChangedWithoutWifi(EditText editText, List<CurrencyDatabaseModel> list, CurrencyDatabaseModel currencyDatabaseModel){
+        editText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                String sValue = s.toString();
+                if (sValue.isEmpty()) {
+                    value = 1.0;
+                } else {
+                    if(!checkInternetConnection()){
+                        recyclerViewAdapterWithoutWiFi.updateList(list, Double.parseDouble(String.valueOf(Double.parseDouble(sValue)/Double.parseDouble(currencyDatabaseModel.getCurValue()))));
+                    }
+                }
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+
+            }
+        });
     }
 
     // if internet connnection is lost set adapter to recycler in this condition
@@ -201,7 +233,8 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
     }
 
 
-    private void getAllCurrencyInformationWithEnqueue(ResponseModelItem responseModelItem, CurrencyDao dao, String base_rate, double eDouble) {
+    // onChangeBaseRate interface calls this method when clicked an item
+    private void getAllCurrencyInformationWithEnqueue(ResponseModelItem responseModelItem, CurrencyDao dao, String base_rate) {
 
         editRate.setText("1");
         rate_name.setText(responseModelItem.getName());
@@ -221,6 +254,10 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
                     for (int position = 1; position <= list.size(); position++) {
                         if (preferenceManager.getString("situation_db").equals("full")) {
 
+                            /*
+                            update database due to clicked item if database is empty some reasons for instance
+                            response is not successful
+                             */
                             currencyDatabaseModel.curID = position;
                             currencyDatabaseModel.curName = list.get(position - 1).getName();
                             currencyDatabaseModel.curCode = list.get(position - 1).getCode();
@@ -229,6 +266,7 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
 
                         } else if (preferenceManager.getString("situation_db").equals("empty")) {
 
+                            // if database is null then insert all items to the database
                             currencyDatabaseModel.curCode = list.get(position - 1).getCode();
                             currencyDatabaseModel.curName = list.get(position - 1).getName();
                             currencyDatabaseModel.curValue = String.format("%.3f", list.get(position - 1).getRate());
@@ -246,14 +284,13 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
 
             @Override
             public void onFailure(Call<ArrayList<ResponseModelItem>> call, Throwable t) {
-                recyclerViewAdapterWithoutWiFi = new RecyclerViewAdapterWithoutWiFi(MainActivity.this, dao.getAllCurrency(), value, MainActivity.this, preferenceManager);
-                recyclerViewAdapterWithoutWiFi.notifyDataSetChanged();
-                recyclerView.setAdapter(recyclerViewAdapterWithoutWiFi);
+                Log.d(TAG, "onFailure: " + t.getMessage());
             }
         });
 
     }
 
+    // dynamic method solves update items problem and every 1 second it goes to "updateListMethod()"
     private void getDynamicCurrencyInformations(CurrencyDao dao, CurrencyDatabaseModel currencyDatabaseModel, String base_rate, double value) {
         IApi api = new ApiClient().getRetrofit().create(IApi.class);
 
@@ -296,16 +333,21 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
 
             @Override
             public void onFailure(Call<ArrayList<ResponseModelItem>> call, Throwable t) {
-                try {
-                    recyclerViewAdapterWithoutWiFi.updateList(dao.getAllCurrency(), value);
-                }catch (NullPointerException e){
-                    e.printStackTrace();
-                }
+                Log.d(TAG, "onFailure: " + t.getMessage());
             }
         });
 
     }
 
+    /**
+     * this method uses in 2 places
+     * 1) program is running
+     * 2) editRate on onTextChanged
+     * @param dao
+     * @param currencyDatabaseModel
+     * @param base_rate
+     * @param value
+     */
     private void getInfoForFirstTime(CurrencyDao dao, CurrencyDatabaseModel currencyDatabaseModel, String base_rate, double value){
         Call<ArrayList<ResponseModelItem>> call = api.getCurrencyInformations(base_rate);
         call.enqueue(new Callback<ArrayList<ResponseModelItem>>() {
@@ -313,7 +355,7 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
             public void onResponse(Call<ArrayList<ResponseModelItem>> call, Response<ArrayList<ResponseModelItem>> response) {
                 if (response.isSuccessful()) {
 
-                    progressBar.setVisibility(View.INVISIBLE);
+                    progressBar.setVisibility(View.INVISIBLE); // response is successfull progressbar becomes invisible
 
                     list = response.body();
                     for (int position = 1; position <= list.size(); position++) {
@@ -350,6 +392,7 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
             public void onFailure(Call<ArrayList<ResponseModelItem>> call, Throwable t) {
                 progressBar.setVisibility(View.INVISIBLE);
                 relativeLayout.setVisibility(View.VISIBLE);
+                // for the first time if database is not empty, recyclerViewAdapterWithoutWiFi sets to reyclerView(only program is running)
                 recyclerViewAdapterWithoutWiFi = new RecyclerViewAdapterWithoutWiFi(MainActivity.this, dao.getAllCurrency(), value, MainActivity.this, preferenceManager);
                 recyclerViewAdapterWithoutWiFi.notifyDataSetChanged();
                 recyclerView.setAdapter(recyclerViewAdapterWithoutWiFi);
@@ -358,17 +401,31 @@ RecyclerViewAdapterWithoutWiFi.OnClickedCallBackListener{
     }
 
 
+    /**
+     * when clicked recycler item, reponseModelItem which we clicked it comes to the interface
+     * and also "base rate"
+     * @param responseModelItem
+     * @param base_rate
+     */
     @Override
     public void onChangeBaseRate(ResponseModelItem responseModelItem, String base_rate) {
-        getAllCurrencyInformationWithEnqueue(responseModelItem, currencyDatabase.currencyDao(), base_rate, Double.parseDouble(editRate.getText().toString()));
+        getAllCurrencyInformationWithEnqueue(responseModelItem, currencyDatabase.currencyDao(), base_rate);
     }
 
+    /**
+     * again clicked database item in recycler and that item and also its position comes to this interface
+     * @param currencyDatabaseModel
+     * @param position
+     */
     @Override
     public void onChangeBaseRateWithoutWifi(CurrencyDatabaseModel currencyDatabaseModel, int position) {
         putBaseRateToTheStorage();
         List<CurrencyDatabaseModel> databaseList = dao.getAllCurrency();
         databaseList.remove(position);
-        recyclerViewAdapterWithoutWiFi = new RecyclerViewAdapterWithoutWiFi(context, dao.getAllCurrency(), Double.parseDouble(String.valueOf(1/Double.parseDouble(currencyDatabaseModel.getCurValue()))),MainActivity.this,  preferenceManager);
+        recyclerViewAdapterWithoutWiFi = new RecyclerViewAdapterWithoutWiFi(context, databaseList, Double.parseDouble(String.valueOf(1/Double.parseDouble(currencyDatabaseModel.getCurValue()))),MainActivity.this,  preferenceManager);
         recyclerView.setAdapter(recyclerViewAdapterWithoutWiFi);
+
+        editRateTextChangedWithoutWifi(editRate, databaseList, currencyDatabaseModel);
+
     }
 }
